@@ -1,61 +1,36 @@
-from typing import List, Iterator
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from collections import deque
 
-class CreativeProcessor:
-    """A data processor employing an unusual weaving technique for transformation."""
+def setup_rotating_logger(name, log_path, max_bytes=1000000, backups=5):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    log_dir = os.path.dirname(log_path)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=backups)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    class RecentLogsHandler(logging.Handler):
+        def __init__(self, maxlen=10):
+            super().__init__()
+            self.recent = deque(maxlen=maxlen)
+        def emit(self, record):
+            self.recent.append(self.format(record))
+    recent_handler = RecentLogsHandler()
+    recent_handler.setFormatter(formatter)
+    logger.addHandler(recent_handler)
+    return logger, recent_handler
 
-    def __init__(self, seed: int = 42) -> None:
-        """Initialize the processor with a creative seed value.
-
-        Args:
-            seed: Integer seed influencing the weaving pattern.
-        """
-        self.seed = seed
-
-    def _weave(self, data: List[int]) -> Iterator[int]:
-        """Generate a woven sequence by alternating forward and backward elements.
-        The seed modulates the addition in an unusual way.
-
-        Args:
-            data: List of integers to weave.
-
-        Yields:
-            Transformed integers in woven order.
-        """
-        n = len(data)
-        for i in range(n):
-            yield data[i] + (self.seed % (i + 1))
-            if i % 2 == 0 and i + 1 < n:
-                yield data[n - i - 1] * (self.seed % 3 + 1)
-
-    def process(self, input_data: List[int]) -> List[int]:
-        """Process input data using the creative weave and accumulation.
-
-        Args:
-            input_data: List of integers to process.
-
-        Returns:
-            List of processed integers.
-        """
-        if not input_data:
-            return []
-
-        woven = list(self._weave(input_data))
-        # Unusual cumulative sum applied in reverse order then reversed
-        result: List[int] = []
-        current = 0
-        for val in reversed(woven):
-            current += val
-            result.append(current)
-
-        return result[::-1]
-
-    def batch_process(self, batches: List[List[int]]) -> List[List[int]]:
-        """Apply processing to multiple batches of data.
-
-        Args:
-            batches: List of data lists.
-
-        Returns:
-            List of processed batches.
-        """
-        return [self.process(batch) for batch in batches]
+if __name__ == '__main__':
+    logger, recent = setup_rotating_logger('dev-toolkit-42', 'logs/app.log')
+    logger.info('Application started with rotating logger')
+    logger.debug('This is a debug message')
+    logger.warning('Warning message for rotation test')
+    print('Recent logs captured:')
+    for log in recent.recent:
+        print(log)
+    print('Logger with rotation is ready.')
