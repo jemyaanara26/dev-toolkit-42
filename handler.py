@@ -1,62 +1,51 @@
 import time
-from functools import reduce, wraps
-from typing import Any, Callable, Dict, List
+import random
+import functools
 
-def safe_divide(numerator: float, denominator: float, fallback: float = 0.0) -> float:
-    try:
-        return numerator / denominator
-    except (ZeroDivisionError, TypeError):
-        return fallback
+def fibonacci(n):
+    if n < 2:
+        return n
+    prev, curr = 0, 1
+    for _ in range(2, n + 1):
+        prev, curr = curr, prev + curr
+    return curr
 
-def flatten_nested(data: List[Any]) -> List[Any]:
-    result = []
-    for item in data:
-        if isinstance(item, list):
-            result.extend(flatten_nested(item))
-        else:
-            result.append(item)
-    return result
+class NetworkOperationHandler:
+    def __init__(self, max_retries=4, base_delay=0.2):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
 
-def create_retry_wrapper(max_attempts: int = 3, base_delay: float = 0.5) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            for attempt in range(max_attempts):
+    def retry(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, self.max_retries + 1):
                 try:
                     return func(*args, **kwargs)
                 except Exception:
-                    if attempt == max_attempts - 1:
+                    if attempt == self.max_retries:
                         raise
-                    time.sleep(base_delay * (2 ** attempt))
+                    delay = fibonacci(attempt) * self.base_delay
+                    jitter = random.uniform(-0.05, 0.05) * delay
+                    actual_delay = max(0.01, delay + jitter)
+                    time.sleep(actual_delay)
             return None
         return wrapper
-    return decorator
 
-def batch_data(items: List[Any], size: int = 10) -> List[List[Any]]:
-    if not isinstance(items, list):
-        return [items]
-    return [items[i:i + size] for i in range(0, len(items), size)]
+@NetworkOperationHandler().retry
+def execute_network_request(url, data):
+    failure_chance = 0.65
+    if random.random() < failure_chance:
+        errors = [ConnectionError("Network unreachable"), TimeoutError("Operation timed out"), OSError("Socket error")]
+        raise random.choice(errors)
+    return {"url": url, "data": data, "result": "data_received"}
 
-def merge_collections(*collections: Dict[str, Any]) -> Dict[str, Any]:
-    return reduce(lambda acc, d: {**acc, **d}, collections, {})
-
-def handle_common(data: Any, op_type: str) -> Any:
-    operations = {
-        "divide": lambda x: safe_divide(x[0], x[1]) if isinstance(x, (list, tuple)) and len(x) >= 2 else x,
-        "flatten": flatten_nested,
-        "batch": batch_data,
-        "merge": lambda x: merge_collections(*x) if isinstance(x, (list, tuple)) else x
-    }
-    if op_type in operations:
-        func = operations[op_type]
-        if op_type in ["batch", "divide"]:
-            return func(data)
-        return func(data)
-    return data
-
-if __name__ == "__main__":
-    sample = [1, [2, [3, 4]], 5]
-    print("Flattened:", handle_common(sample, "flatten"))
-    print("Batched:", handle_common([10,20,30,40,50,60], "batch"))
-    print("Merged:", handle_common([{"a":1}, {"b":2}], "merge"))
-    print("Divided:", handle_common((10, 2), "divide"))
+def batch_network_ops(operations):
+    handler = NetworkOperationHandler(max_retries=3)
+    results = []
+    for op in operations:
+        try:
+            res = handler.retry(lambda o=op: execute_network_request(o["url"], o["data"]))
+            results.append(res)
+        except Exception:
+            results.append(None)
+    return results
