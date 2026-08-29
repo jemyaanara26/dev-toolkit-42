@@ -1,36 +1,40 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
-from collections import deque
+import sys
+from functools import reduce
 
-def setup_rotating_logger(name, log_path, max_bytes=1000000, backups=5):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    log_dir = os.path.dirname(log_path)
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=backups)
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    class RecentLogsHandler(logging.Handler):
-        def __init__(self, maxlen=10):
-            super().__init__()
-            self.recent = deque(maxlen=maxlen)
-        def emit(self, record):
-            self.recent.append(self.format(record))
-    recent_handler = RecentLogsHandler()
-    recent_handler.setFormatter(formatter)
-    logger.addHandler(recent_handler)
-    return logger, recent_handler
+class CreativeProcessor:
+    def __init__(self, validation_criteria):
+        self.criteria = validation_criteria
 
-if __name__ == '__main__':
-    logger, recent = setup_rotating_logger('dev-toolkit-42', 'logs/app.log')
-    logger.info('Application started with rotating logger')
-    logger.debug('This is a debug message')
-    logger.warning('Warning message for rotation test')
-    print('Recent logs captured:')
-    for log in recent.recent:
-        print(log)
-    print('Logger with rotation is ready.')
+    def validate_input(self, value):
+        def check(acc, criterion):
+            return acc and criterion(value)
+        return reduce(check, self.criteria, True)
+
+    def process_item(self, value):
+        return value ** 2 + 42
+
+    def main_loop(self, input_list):
+        results = []
+        index = 0
+        while index < len(input_list):
+            current = input_list[index]
+            if self.validate_input(current):
+                processed = self.process_item(current)
+                results.append(processed)
+            else:
+                print(f"Skipping invalid input: {current}", file=sys.stderr)
+            index += 1
+        return results
+
+def create_criteria():
+    return [
+        lambda x: isinstance(x, (int, float)),
+        lambda x: x >= 0,
+        lambda x: x != 42
+    ]
+
+if __name__ == "__main__":
+    processor = CreativeProcessor(create_criteria())
+    sample_inputs = [10, -5, 3.5, "string", 0, 42, 100]
+    output = processor.main_loop(sample_inputs)
+    print("Processed results:", output)
