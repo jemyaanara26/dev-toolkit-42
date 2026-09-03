@@ -1,36 +1,63 @@
 # dev-toolkit-42
 
-A comprehensive collection of utility scripts designed to simplify common development tasks in Python. This toolkit enhances productivity by providing developers with quick solutions to everyday challenges.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+`dev-toolkit-42` is a versatile suite of command-line utilities and helper functions designed to streamline daily Python development workflows. It automates tedious tasks like configuration validation, environment auditing, and multi-format logging with a single, unified interface.
 
 ## Features
 
-- **Code Formatter**: Automatically formats Python code according to PEP 8 standards to maintain consistent coding style.
-- **Environment Manager**: Easily create, activate, and manage virtual environments with integrated functionality for package installation.
-- **Dependency Checker**: Analyze and list outdated packages in your projects, making it simple to keep dependencies up-to-date.
-- **Quick Documentation Generator**: Generate Markdown documentation from Python docstrings, enhancing code clarity and facilitating better collaboration.
+* **Auto-Environment Audit**: Scans and compares your `.env` files against `.env.example` templates to flag missing or misconfigured keys.
+* **Smart Configuration Converter**: Instantly transforms configurations between YAML, JSON, and TOML with automatic schema-validation.
+* **Execution Profiler**: A high-precision decorator that benchmarks Python function runtime and automatically saves execution logs to a local SQLite database.
 
 ## Installation
 
-To get started, clone the repository and install the required dependencies:
+Install the package directly from PyPI:
 
 ```bash
-git clone https://github.com/Developer/dev-toolkit-42.git
+pip install dev-toolkit-42
+```
+
+Or install the development version from source:
+
+```bash
+git clone https://github.com/developer/dev-toolkit-42.git
 cd dev-toolkit-42
-pip install -r requirements.txt
+pip install -e .
 ```
 
-## Basic Usage Example
+## Quick Start
 
-After installation, you can use the individual modules directly from the command line or import them into your Python scripts. Here's a quick demo of how to use the Code Formatter feature:
+### 1. Audit Environment Variables
 
-```bash
-python -m dev_toolkit.formatter your_script.py
+Verify that your local environment is correctly configured before starting your application:
+
+```python
+from dev_toolkit_42 import audit_env
+
+# Flags keys present in .env.example but missing in .env
+missing = audit_env(".env", ".env.example")
+if missing:
+    print(f"Warning: Missing keys found: {missing}")
 ```
 
-This command will format `your_script.py` according to PEP 8 standards. For a more interactive experience, you can explore other features by referencing their respective documentation included in the repository.
+### 2. Profile Code Execution
+
+Benchmark critical paths in your application with database logging:
+
+```python
+import time
+from dev_toolkit_42 import benchmark
+
+@benchmark(db_log=True)
+def heavy_calculation():
+    time.sleep(0.5)
+    return sum(i * i for i in range(100000))
+
+# Executes and saves metrics (timestamp, duration, function name) to dev_metrics.db
+heavy_calculation()
+```
 
 ## License
 
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-Feel free to contribute to the project by submitting issues or pull requests. Your feedback and contributions are highly valued!
+This project is licensed under the MIT License - see the LICENSE file for details.
