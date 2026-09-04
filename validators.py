@@ -1,36 +1,39 @@
-import sys
+import functools
+from typing import Any, Callable, Dict
 
-class DataValidator:
-    def __init__(self, schema=None):
-        self.schema = schema or {}
+class ValidationError(Exception):
+    pass
 
-    def sanitize(self, raw_input):
-        if isinstance(raw_input, str):
-            return raw_input.strip()
-        return raw_input
+def validate_input(schema: Dict[str, type]):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for key, expected_type in schema.items():
+                value = kwargs.get(key)
+                if value is None:
+                    raise ValidationError(f"missing required param: {key}")
+                if not isinstance(value, expected_type):
+                    raise ValidationError(f"type mismatch for {key}: expected {expected_type.__name__}")
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
-    def validate_packet(self, packet):
-        if not isinstance(packet, dict):
-            raise ValueError("Packet must be a dictionary structure")
-            
-        cleaned = {}
-        for key, expected_type in self.schema.items():
-            if key not in packet:
-                raise KeyError(f"Missing mandatory transmission key: {key}")
-                
-            val = self.sanitize(packet[key])
-            if not isinstance(val, expected_type):
-                try:
-                    val = expected_type(val)
-                except (ValueError, TypeError):
-                    raise TypeError(f"Type mismatch on '{key}': expected {expected_type.__name__}")
-            cleaned[key] = val
-        return cleaned
+@validate_input({"data": dict, "priority": int})
+def process_payload(**kwargs):
+    return f"processing {kwargs['data']} at level {kwargs['priority']}"
 
-    def __call__(self, payload_stream):
-        for index, item in enumerate(payload_stream):
-            try:
-                yield self.validate_packet(item)
-            except Exception as err:
-                sys.stderr.write(f"[ValidatorAnomaly @ idx {index}]: {err}\n")
-                continue
+def run_loop(items):
+    for item in items:
+        try:
+            result = process_payload(**item)
+            print(f"Success: {result}")
+        except (ValidationError, TypeError) as e:
+            print(f"Validation failure: {e}")
+
+if __name__ == "__main__":
+    data_stream = [
+        {"data": {"task": "a"}, "priority": 1},
+        {"data": "bad_input", "priority": 2},
+        {"data": {"task": "b"}, "priority": "high"}
+    ]
+    run_loop(data_stream)
