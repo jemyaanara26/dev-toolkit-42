@@ -1,33 +1,31 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import datetime
+from typing import Any
 
-def get_logger(name: str, log_file: str = 'dev-toolkit-42.log') -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    
-    # unique formatter approach
-    class CreativeFormatter(logging.Formatter):
-        def format(self, record):
-            prefix = '[DEV-42]'
-            return f'{prefix} {record.levelname}: {record.msg}'
+class DevLogger:
+    def __init__(self, prefix: str = "[dev-toolkit-42]"):
+        self.prefix = prefix
+        self.stream = sys.stdout
 
-    if not logger.handlers:
-        handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=1024 * 1024 * 5, 
-            backupCount=3
-        )
-        handler.setFormatter(CreativeFormatter())
-        logger.addHandler(handler)
-        
-        # console fallback
-        console = logging.StreamHandler()
-        console.setFormatter(CreativeFormatter())
-        logger.addHandler(console)
-    
-    return logger
+    def __call__(self, *args: Any, level: str = "INFO") -> None:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        message = " ".join(map(str, args))
+        output = f"{timestamp} {self.prefix} {level}: {message}"
+        self.stream.write(output + "\n")
+        self.stream.flush()
 
-if __name__ == '__main__':
-    log = get_logger('core')
-    log.info('toolkit initialized with rotation enabled')
+    def success(self, *args: Any) -> None:
+        self(*args, level="SUCCESS")
+
+    def error(self, *args: Any) -> None:
+        self(*args, level="CRITICAL")
+
+class LoggerInstance:
+    _instance = None
+
+    def __new__(cls):
+        if not cls._instance:
+            cls._instance = DevLogger()
+        return cls._instance
+
+logger = LoggerInstance()
