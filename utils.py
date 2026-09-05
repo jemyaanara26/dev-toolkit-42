@@ -1,69 +1,57 @@
-import os
-import json
-import time
-import functools
-from collections import defaultdict
-from typing import Any, Dict, List, Callable, Optional
+from typing import Callable, Any, TypeVar, Generic, Dict, List
 
-def timer(func: Callable[[Any], Any]) -> Callable[[Any], Any]:
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start
-        print(f"Executed {func.__name__} in {elapsed:.4f} seconds")
-        return result
-    return wrapper
+T = TypeVar("T")
+R = TypeVar("R")
 
-def flatten_nested(data: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
-    def _flatten(obj: Any, parent: str = "") -> Dict[str, Any]:
-        items: Dict[str, Any] = {}
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                new_key = f"{parent}{sep}{k}" if parent else k
-                items.update(_flatten(v, new_key))
-        elif isinstance(obj, list):
-            for i, v in enumerate(obj):
-                new_key = f"{parent}{sep}{i}" if parent else str(i)
-                items.update(_flatten(v, new_key))
+class MorphPipeline(Generic[T, R]):
+    """A fluent pipeline for transforming data structures with lazy evaluation semantics."""
+
+    def __init__(self, initial_data: T) -> None:
+        """Initialize the pipeline with a primary payload."""
+        self._payload: T = initial_data
+        self._transforms: List[Callable[[Any], Any]] = []
+
+    def morph(self, fn: Callable[[Any], Any]) -> "MorphPipeline[T, Any]":
+        """Queue a transformation step into the morphing pipeline.
+
+        Args:
+            fn: Transformation function accepting payload and returning modified state.
+        """
+        self._transforms.append(fn)
+        return self
+
+    def resolve(self) -> Any:
+        """Execute queued transformations iteratively over the payload.
+
+        Returns:
+            The fully transformed result after applying all staged functions.
+        """
+        current: Any = self._payload
+        for step in self._transforms:
+            current = step(current)
+        return current
+
+    def __or__(self, fn: Callable[[Any], Any]) -> "MorphPipeline[T, Any]":
+        """Overload bitwise OR operator to allow pipe syntax (pipeline | transform)."""
+        return self.morph(fn)
+
+
+def deep_flatten(dictionary: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
+    """Recursively flatten a nested dictionary into single-level dot-separated key-value pairs.
+
+    Args:
+        dictionary: The nested dictionary to flatten.
+        parent_key: The accumulated prefix key from higher recursion levels.
+        sep: Separator character joining nested key names.
+
+    Returns:
+        A flattened single-depth dictionary.
+    """
+    items: List[tuple[str, Any]] = []
+    for k, v in dictionary.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(deep_flatten(v, new_key, sep=sep).items())
         else:
-            items[parent] = obj
-        return items
-    return _flatten(data)
-
-@timer
-def load_and_flatten_config(config_path: str) -> Dict[str, Any]:
-    with open(config_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return flatten_nested(data)
-
-def reorganize_by_key(items: List[Dict[str, Any]], key: str) -> Dict[str, List[Dict[str, Any]]]:
-    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for item in items:
-        group_key = item.get(key, "unknown")
-        grouped[group_key].append(item)
-    return dict(grouped)
-
-def compute_project_stats(directory: str) -> Dict[str, Any]:
-    py_files = []
-    total_lines = 0
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
-        for file in files:
-            if file.endswith(".py"):
-                full_path = os.path.join(root, file)
-                py_files.append(full_path)
-                with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                    total_lines += sum(1 for line in f if line.strip())
-    return {
-        "python_files": len(py_files),
-        "total_lines": total_lines,
-        "avg_lines_per_file": total_lines / len(py_files) if py_files else 0
-    }
-
-if __name__ == "__main__":
-    print("Utils module loaded successfully")
-    sample_data = {"a": {"b": 1, "c": [2, 3]}, "d": 4}
-    print(flatten_nested(sample_data))
-    stats = compute_project_stats(".")
-    print(stats)
+            items.append((new_key, v))
+    return dict(items)
