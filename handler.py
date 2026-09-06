@@ -1,51 +1,57 @@
-import time
-import random
-import functools
+import inspect
+from difflib import get_close_matches
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-def fibonacci(n):
-    if n < 2:
-        return n
-    prev, curr = 0, 1
-    for _ in range(2, n + 1):
-        prev, curr = curr, prev + curr
-    return curr
 
-class NetworkOperationHandler:
-    def __init__(self, max_retries=4, base_delay=0.2):
-        self.max_retries = max_retries
-        self.base_delay = base_delay
+class EdgeCaseHandler:
+    """Resilient execution wrapper handling runtime edge cases gracefully."""
 
-    def retry(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(1, self.max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except Exception:
-                    if attempt == self.max_retries:
-                        raise
-                    delay = fibonacci(attempt) * self.base_delay
-                    jitter = random.uniform(-0.05, 0.05) * delay
-                    actual_delay = max(0.01, delay + jitter)
-                    time.sleep(actual_delay)
-            return None
-        return wrapper
+    def __init__(self, default_return: Any = None):
+        self.default_return = default_return
+        self.fallback_strategies: Dict[type, Callable] = {
+            ZeroDivisionError: lambda e, *a, **kw: float("inf"),
+            KeyError: self._handle_key_error,
+            IndexError: self._handle_index_error,
+            TypeError: self._handle_type_error,
+        }
 
-@NetworkOperationHandler().retry
-def execute_network_request(url, data):
-    failure_chance = 0.65
-    if random.random() < failure_chance:
-        errors = [ConnectionError("Network unreachable"), TimeoutError("Operation timed out"), OSError("Socket error")]
-        raise random.choice(errors)
-    return {"url": url, "data": data, "result": "data_received"}
+    def _handle_key_error(self, err: KeyError, *args: Any, **kwargs: Any) -> Any:
+        missing_key = err.args[0] if err.args else ""
+        for arg in list(args) + list(kwargs.values()):
+            if isinstance(arg, dict) and missing_key:
+                matches = get_close_matches(str(missing_key), [str(k) for k in arg.keys()], n=1)
+                if matches:
+                    real_key = next((k for k in arg.keys() if str(k) == matches[0]), None)
+                    if real_key in arg:
+                        return arg[real_key]
+        return self.default_return
 
-def batch_network_ops(operations):
-    handler = NetworkOperationHandler(max_retries=3)
-    results = []
-    for op in operations:
+    def _handle_index_error(self, err: IndexError, *args: Any, **kwargs: Any) -> Any:
+        for arg in args:
+            if isinstance(arg, (list, tuple)) and arg:
+                return arg[-1]
+        return self.default_return
+
+    def _handle_type_error(self, err: TypeError, *args: Any, **kwargs: Any) -> Any:
         try:
-            res = handler.retry(lambda o=op: execute_network_request(o["url"], o["data"]))
-            results.append(res)
+            return "".join(str(a) for a in args)
         except Exception:
-            results.append(None)
-    return results
+            return self.default_return
+
+    def execute(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            for exc_type, strategy in self.fallback_strategies.items():
+                if isinstance(exc, exc_type):
+                    return strategy(exc, *args, **kwargs)
+            return self.default_return
+
+
+def safe_invoke(func: Callable, default: Any = None) -> Callable:
+    handler = EdgeCaseHandler(default_return=default)
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return handler.execute(func, *args, **kwargs)
+
+    return wrapper
