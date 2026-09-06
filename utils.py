@@ -1,57 +1,37 @@
-from typing import Callable, Any, TypeVar, Generic, Dict, List
+import time
+import random
+import functools
+from typing import Callable, TypeVar, Any, Sequence, Type
 
-T = TypeVar("T")
-R = TypeVar("R")
+T = TypeVar('T')
 
-class MorphPipeline(Generic[T, R]):
-    """A fluent pipeline for transforming data structures with lazy evaluation semantics."""
+def retry_with_jitter(
+    max_retries: int = 4,
+    base_delay: float = 0.2,
+    max_delay: float = 5.0,
+    retry_exceptions: Sequence[Type[BaseException]] = (Exception,)
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator providing exponential backoff with randomized jitter using a generator pipeline."""
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            def schedule():
+                delay = base_delay
+                for attempt in range(1, max_retries + 1):
+                    jittered = min(max_delay, delay * (1.0 + random.random()))
+                    yield attempt, jittered
+                    delay *= 2.0
 
-    def __init__(self, initial_data: T) -> None:
-        """Initialize the pipeline with a primary payload."""
-        self._payload: T = initial_data
-        self._transforms: List[Callable[[Any], Any]] = []
-
-    def morph(self, fn: Callable[[Any], Any]) -> "MorphPipeline[T, Any]":
-        """Queue a transformation step into the morphing pipeline.
-
-        Args:
-            fn: Transformation function accepting payload and returning modified state.
-        """
-        self._transforms.append(fn)
-        return self
-
-    def resolve(self) -> Any:
-        """Execute queued transformations iteratively over the payload.
-
-        Returns:
-            The fully transformed result after applying all staged functions.
-        """
-        current: Any = self._payload
-        for step in self._transforms:
-            current = step(current)
-        return current
-
-    def __or__(self, fn: Callable[[Any], Any]) -> "MorphPipeline[T, Any]":
-        """Overload bitwise OR operator to allow pipe syntax (pipeline | transform)."""
-        return self.morph(fn)
-
-
-def deep_flatten(dictionary: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Dict[str, Any]:
-    """Recursively flatten a nested dictionary into single-level dot-separated key-value pairs.
-
-    Args:
-        dictionary: The nested dictionary to flatten.
-        parent_key: The accumulated prefix key from higher recursion levels.
-        sep: Separator character joining nested key names.
-
-    Returns:
-        A flattened single-depth dictionary.
-    """
-    items: List[tuple[str, Any]] = []
-    for k, v in dictionary.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(deep_flatten(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+            last_err: Exception | None = None
+            for attempt, delay in schedule():
+                try:
+                    return func(*args, **kwargs)
+                except retry_exceptions as err:
+                    last_err = err
+                    if attempt < max_retries:
+                        time.sleep(delay)
+            if last_err:
+                raise last_err
+            raise RuntimeError("Execution failed without exception")
+        return wrapper
+    return decorator
