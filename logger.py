@@ -1,31 +1,35 @@
 import sys
-import datetime
-from typing import Any
+from queue import Queue
+from threading import Thread
 
-class DevLogger:
-    def __init__(self, prefix: str = "[dev-toolkit-42]"):
-        self.prefix = prefix
-        self.stream = sys.stdout
+class FastLogger:
+    """A high-performance logger that defers string formatting to a background thread."""
+    def __init__(self, stream=None):
+        self.stream = stream or sys.stdout
+        self.queue = Queue(maxsize=5000)
+        self.worker = Thread(target=self._consume, daemon=True)
+        self.worker.start()
 
-    def __call__(self, *args: Any, level: str = "INFO") -> None:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        message = " ".join(map(str, args))
-        output = f"{timestamp} {self.prefix} {level}: {message}"
-        self.stream.write(output + "\n")
-        self.stream.flush()
+    def _consume(self):
+        while True:
+            item = self.queue.get()
+            if item is None:
+                break
+            fmt, args, kwargs = item
+            try:
+                resolved = fmt.format(*args, **kwargs) if (args or kwargs) else str(fmt)
+                self.stream.write(resolved + "\n")
+            except Exception as err:
+                self.stream.write(f"Logging error: {err}\n")
+            finally:
+                self.queue.task_done()
 
-    def success(self, *args: Any) -> None:
-        self(*args, level="SUCCESS")
+    def emit(self, msg, *args, **kwargs):
+        try:
+            self.queue.put_nowait((msg, args, kwargs))
+        except Exception:
+            pass
 
-    def error(self, *args: Any) -> None:
-        self(*args, level="CRITICAL")
-
-class LoggerInstance:
-    _instance = None
-
-    def __new__(cls):
-        if not cls._instance:
-            cls._instance = DevLogger()
-        return cls._instance
-
-logger = LoggerInstance()
+    def shutdown(self):
+        self.queue.put(None)
+        self.worker.join()
