@@ -1,56 +1,40 @@
-import inspect
-from typing import Any, Callable, Dict, List
+import time
+import collections
+from typing import Callable, Any
 
+class AdaptiveExecutor:
+    """
+    An unusual performance optimizer that measures execution times in real-time
+    and adaptively decides whether to use caching or raw inline execution.
+    """
+    def __init__(self, threshold_ms: float = 5.0, history_size: int = 20):
+        self.threshold_ns = threshold_ms * 1_000_000
+        self.history = collections.deque(maxlen=history_size)
+        self.cache = {}
+        self.avg_duration = 0.0
 
-class CorePipeline:
-    """Dynamic pipeline core that auto-organizes step execution order."""
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            key = (args, frozenset(kwargs.items()))
+            
+            if self.avg_duration < self.threshold_ns and self.history:
+                start = time.perf_counter_ns()
+                result = func(*args, **kwargs)
+                duration = time.perf_counter_ns() - start
+                self.history.append(duration)
+                self.avg_duration = sum(self.history) / len(self.history)
+                return result
 
-    def __init__(self, name: str = "main") -> None:
-        self.name = name
-        self._registry: Dict[int, List[Callable[..., Any]]] = {}
+            if key in self.cache:
+                return self.cache[key]
 
-    def step(self, priority: int = 50) -> Callable:
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-            self._registry.setdefault(priority, []).append(func)
-            return func
+            start = time.perf_counter_ns()
+            result = func(*args, **kwargs)
+            duration = time.perf_counter_ns() - start
 
-        return decorator
+            self.history.append(duration)
+            self.avg_duration = sum(self.history) / len(self.history)
+            self.cache[key] = result
+            return result
 
-    def __getitem__(self, priority: int) -> List[Callable[..., Any]]:
-        return self._registry.get(priority, [])
-
-    def execute(self, initial_value: Any) -> Any:
-        state = initial_value
-        ordered_steps = [
-            fn
-            for prio in sorted(self._registry.keys())
-            for fn in self._registry[prio]
-        ]
-
-        for fn in ordered_steps:
-            sig = inspect.signature(fn)
-            if len(sig.parameters) == 0:
-                state = fn()
-            else:
-                state = fn(state)
-        return state
-
-    def __call__(self, initial_value: Any) -> Any:
-        return self.execute(initial_value)
-
-
-kernel = CorePipeline()
-
-
-def reorganize_pipeline(
-    pipeline: CorePipeline, priority_map: Dict[Callable, int]
-) -> CorePipeline:
-    """Re-organizes pipeline steps according to a new priority mapping."""
-    reorganized = CorePipeline(name=f"{pipeline.name}_reorganized")
-    all_steps = [fn for steps in pipeline._registry.values() for fn in steps]
-
-    for fn in all_steps:
-        prio = priority_map.get(fn, 50)
-        reorganized.step(priority=prio)(fn)
-
-    return reorganized
+        return wrapper
