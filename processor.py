@@ -1,40 +1,33 @@
-import sys
-from functools import reduce
+from typing import Any, Dict, Generator, Callable
 
-class CreativeProcessor:
-    def __init__(self, validation_criteria):
-        self.criteria = validation_criteria
+class Rule:
+    def __init__(self, key: str, check: Callable[[Any], bool]):
+        self.key = key
+        self.check = check
 
-    def validate_input(self, value):
-        def check(acc, criterion):
-            return acc and criterion(value)
-        return reduce(check, self.criteria, True)
+    def __rrshift__(self, data: Dict[str, Any]) -> bool:
+        # Right-shift operator override for unusual data-to-rule validation syntax
+        if self.key not in data:
+            return False
+        try:
+            return self.check(data[self.key])
+        except Exception:
+            return False
 
-    def process_item(self, value):
-        return value ** 2 + 42
+class ProcessingEngine:
+    def __init__(self, rules: list[Rule]):
+        self.rules = rules
 
-    def main_loop(self, input_list):
-        results = []
-        index = 0
-        while index < len(input_list):
-            current = input_list[index]
-            if self.validate_input(current):
-                processed = self.process_item(current)
-                results.append(processed)
+    def stream_process(self, stream: Generator[Dict[str, Any], None, None]) -> Generator[Dict[str, Any], None, None]:
+        """Main processing loop validating inputs on-the-fly using custom shift operators."""
+        for payload in stream:
+            is_valid = all(payload >> rule for rule in self.rules)
+            if not is_valid:
+                payload["__quarantined__"] = True
+                payload["__status__"] = "failed_validation"
             else:
-                print(f"Skipping invalid input: {current}", file=sys.stderr)
-            index += 1
-        return results
-
-def create_criteria():
-    return [
-        lambda x: isinstance(x, (int, float)),
-        lambda x: x >= 0,
-        lambda x: x != 42
-    ]
-
-if __name__ == "__main__":
-    processor = CreativeProcessor(create_criteria())
-    sample_inputs = [10, -5, 3.5, "string", 0, 42, 100]
-    output = processor.main_loop(sample_inputs)
-    print("Processed results:", output)
+                payload["__quarantined__"] = False
+                payload["__status__"] = "processed"
+                if "value" in payload and isinstance(payload["value"], (int, float)):
+                    payload["value"] *= 42
+            yield payload
