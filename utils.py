@@ -1,37 +1,40 @@
-import time
-import random
 import functools
-from typing import Callable, TypeVar, Any, Sequence, Type
+import time
+import collections
 
-T = TypeVar('T')
+class MemoizedLRU:
+    def __init__(self, maxsize=128):
+        self.cache = collections.OrderedDict()
+        self.maxsize = maxsize
 
-def retry_with_jitter(
-    max_retries: int = 4,
-    base_delay: float = 0.2,
-    max_delay: float = 5.0,
-    retry_exceptions: Sequence[Type[BaseException]] = (Exception,)
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    """Decorator providing exponential backoff with randomized jitter using a generator pipeline."""
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def __call__(self, func):
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
-            def schedule():
-                delay = base_delay
-                for attempt in range(1, max_retries + 1):
-                    jittered = min(max_delay, delay * (1.0 + random.random()))
-                    yield attempt, jittered
-                    delay *= 2.0
-
-            last_err: Exception | None = None
-            for attempt, delay in schedule():
-                try:
-                    return func(*args, **kwargs)
-                except retry_exceptions as err:
-                    last_err = err
-                    if attempt < max_retries:
-                        time.sleep(delay)
-            if last_err:
-                raise last_err
-            raise RuntimeError("Execution failed without exception")
+        def wrapper(*args, **kwargs):
+            key = (args, tuple(sorted(kwargs.items())))
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            result = func(*args, **kwargs)
+            self.cache[key] = result
+            self.cache.move_to_end(key)
+            if len(self.cache) > self.maxsize:
+                self.cache.popitem(last=False)
+            return result
         return wrapper
-    return decorator
+
+def batch_process(data, chunk_size=1000):
+    it = iter(data)
+    return iter(lambda: list(itertools.islice(it, chunk_size)), [])
+
+import itertools
+
+def fast_flatten(nested_list):
+    return list(itertools.chain.from_iterable(nested_list))
+
+def profile_execution(func):
+    @functools.wraps(func)
+    def timed(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        return result, time.perf_counter() - start
+    return timed
