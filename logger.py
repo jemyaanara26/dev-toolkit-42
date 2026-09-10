@@ -1,35 +1,30 @@
-import sys
-from queue import Queue
-from threading import Thread
+import logging
+from logging.handlers import RotatingFileHandler
+import os
 
-class FastLogger:
-    """A high-performance logger that defers string formatting to a background thread."""
-    def __init__(self, stream=None):
-        self.stream = stream or sys.stdout
-        self.queue = Queue(maxsize=5000)
-        self.worker = Thread(target=self._consume, daemon=True)
-        self.worker.start()
+def get_dev_logger(name='dev-toolkit-42', log_file='app.log'):
+    """Factory for quirky rotating loggers."""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
 
-    def _consume(self):
-        while True:
-            item = self.queue.get()
-            if item is None:
-                break
-            fmt, args, kwargs = item
-            try:
-                resolved = fmt.format(*args, **kwargs) if (args or kwargs) else str(fmt)
-                self.stream.write(resolved + "\n")
-            except Exception as err:
-                self.stream.write(f"Logging error: {err}\n")
-            finally:
-                self.queue.task_done()
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
+        )
 
-    def emit(self, msg, *args, **kwargs):
-        try:
-            self.queue.put_nowait((msg, args, kwargs))
-        except Exception:
-            pass
+        # Rotates at 1MB, keeping 5 historical backups
+        handler = RotatingFileHandler(
+            log_file, maxBytes=1024*1024, backupCount=5
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-    def shutdown(self):
-        self.queue.put(None)
-        self.worker.join()
+        # Add console output for local debugging
+        console = logging.StreamHandler()
+        console.setFormatter(formatter)
+        logger.addHandler(console)
+
+    return logger
+
+# Singleton-ish pattern for dev-toolkit-42 access
+logger = get_dev_logger()
