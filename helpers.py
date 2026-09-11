@@ -1,44 +1,45 @@
-import functools
-import logging
 import time
+import functools
+import random
 from typing import Callable, Any
 
-def resilient_wrapper(retries: int = 3, delay: float = 0.5):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            last_ex = None
-            for attempt in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError, ValueError) as e:
-                    last_ex = e
-                    logging.warning(f'attempt {attempt+1} failed: {e}')
-                    time.sleep(delay * (2 ** attempt))
-                except Exception as e:
-                    logging.critical(f'fatal non-recoverable error: {e}')
-                    raise e
-            raise last_ex or RuntimeError('unknown failure')
-        return wrapper
-    return decorator
-
-def safe_dict_get(data: dict, path: str, default: Any = None) -> Any:
-    keys = path.split('.')
-    curr = data
-    try:
-        for key in keys:
-            curr = curr[key]
-        return curr if curr is not None else default
-    except (KeyError, TypeError, AttributeError):
-        return default
-
-def suppress_errors(default_val: Any = None):
+def retry_on_failure(retries: int = 3, delay: float = 0.5):
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                return default_val
+            last_ex = None
+            for _ in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+                    time.sleep(delay * random.uniform(0.5, 1.5))
+            raise last_ex
         return wrapper
     return decorator
+
+def memoize_with_ttl(ttl: int = 60):
+    cache = {}
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args):
+            now = time.time()
+            if args in cache:
+                val, ts = cache[args]
+                if now - ts < ttl:
+                    return val
+            result = func(*args)
+            cache[args] = (result, now)
+            return result
+        return wrapper
+    return decorator
+
+def flatten_nested_dict(d: dict, parent_key: str = '', sep: str = '_') -> dict:
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_nested_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
