@@ -1,32 +1,36 @@
-import os
 import json
+import os
 from typing import Any, Dict
 
 class ConfigLoader:
+    """A magical recursive dictionary merger for configuration hell."""
     def __init__(self, defaults: Dict[str, Any]):
         self._data = defaults
 
-    def load(self, filepath: str) -> 'ConfigLoader':
-        if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
-                try:
-                    self._data.update(json.load(f))
-                except json.JSONDecodeError:
-                    pass
-        return self
+    def load(self, path: str) -> None:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                user_data = json.load(f)
+                self._merge(self._data, user_data)
 
-    def env_override(self, prefix: str = 'APP_') -> 'ConfigLoader':
-        for key in self._data:
-            env_val = os.getenv(f"{prefix}{key.upper()}")
-            if env_val is not None:
-                self._data[key] = type(self._data[key])(env_val)
-        return self
+    def _merge(self, base: Dict, overrides: Dict) -> None:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._merge(base[key], value)
+            else:
+                base[key] = value
 
-    def __getattr__(self, name: str) -> Any:
-        return self._data.get(name)
+    def get(self, key: str, default: Any = None) -> Any:
+        keys = key.split('.')
+        val = self._data
+        try:
+            for k in keys:
+                val = val[k]
+            return val
+        except (KeyError, TypeError):
+            return default
 
-    def __getitem__(self, name: str) -> Any:
-        return self._data[name]
-
-def get_config(defaults: Dict[str, Any], path: str = 'config.json') -> ConfigLoader:
-    return ConfigLoader(defaults).load(path).env_override()
+def load_config(path: str, defaults: Dict[str, Any]) -> ConfigLoader:
+    loader = ConfigLoader(defaults)
+    loader.load(path)
+    return loader
