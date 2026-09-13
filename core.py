@@ -1,40 +1,44 @@
-import time
-import collections
-from typing import Callable, Any
+import functools
+from typing import Any, Callable, Mapping
 
-class AdaptiveExecutor:
-    """
-    An unusual performance optimizer that measures execution times in real-time
-    and adaptively decides whether to use caching or raw inline execution.
-    """
-    def __init__(self, threshold_ms: float = 5.0, history_size: int = 20):
-        self.threshold_ns = threshold_ms * 1_000_000
-        self.history = collections.deque(maxlen=history_size)
-        self.cache = {}
-        self.avg_duration = 0.0
+class DeepAccess:
+    """Dynamic key/attribute access helper supporting dot and index syntax."""
+    def __init__(self, path: str):
+        self._parts = [p.strip("]") for p in path.replace("[", ".").split(".") if p]
 
-    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            key = (args, frozenset(kwargs.items()))
-            
-            if self.avg_duration < self.threshold_ns and self.history:
-                start = time.perf_counter_ns()
-                result = func(*args, **kwargs)
-                duration = time.perf_counter_ns() - start
-                self.history.append(duration)
-                self.avg_duration = sum(self.history) / len(self.history)
-                return result
+    def __call__(self, target: Any) -> Any:
+        current = target
+        for part in self._parts:
+            try:
+                if part.isdigit() and not hasattr(current, part):
+                    current = current[int(part)]
+                elif isinstance(current, Mapping) and part in current:
+                    current = current[part]
+                else:
+                    current = getattr(current, part)
+            except (KeyError, IndexError, AttributeError, TypeError):
+                return None
+        return current
 
-            if key in self.cache:
-                return self.cache[key]
+class Pipeline:
+    """Fluent function execution pipeline using left-shift overloading."""
+    def __init__(self, data: Any):
+        self.data = data
 
-            start = time.perf_counter_ns()
-            result = func(*args, **kwargs)
-            duration = time.perf_counter_ns() - start
+    def __lshift__(self, action: Callable[[Any], Any]) -> "Pipeline":
+        return Pipeline(action(self.data))
 
-            self.history.append(duration)
-            self.avg_duration = sum(self.history) / len(self.history)
-            self.cache[key] = result
-            return result
+    def unwrap(self) -> Any:
+        return self.data
 
+def safe_bind(position: int, *args, **kwargs) -> Callable:
+    """Binds arguments starting at a specific positional slot dynamically."""
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*runtime_args, **runtime_kwargs):
+            merged_args = list(runtime_args)
+            for i, arg in enumerate(args):
+                merged_args.insert(position + i, arg)
+            return func(*merged_args, **{**kwargs, **runtime_kwargs})
         return wrapper
+    return decorator
