@@ -1,30 +1,39 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
+import sys
+import traceback
+from typing import Any
 
-def get_dev_logger(name='dev-toolkit-42', log_file='app.log'):
-    """Factory for quirky rotating loggers."""
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+class BoundaryResilientLogger:
+    def __init__(self, fallback_stream=sys.stderr):
+        self.fallback = fallback_stream
+        self._in_logging = False
 
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
-        )
+    def emit(self, level: str, raw_payload: Any) -> None:
+        if self._in_logging:
+            return
+        self._in_logging = True
+        try:
+            try:
+                text = str(raw_payload)
+            except Exception as repr_err:
+                text = f"[unrepresentable payload: {type(raw_payload).__name__} ({repr_err})]"
 
-        # Rotates at 1MB, keeping 5 historical backups
-        handler = RotatingFileHandler(
-            log_file, maxBytes=1024*1024, backupCount=5
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+            entry = f"[{level.upper()}] {text.encode('utf-8', errors='backslashreplace').decode('utf-8')}\n"
+            
+            try:
+                self.fallback.write(entry)
+                self.fallback.flush()
+            except (AttributeError, IOError, ValueError):
+                try:
+                    sys.__stderr__.write(entry)
+                    sys.__stderr__.flush()
+                except Exception:
+                    pass
+        finally:
+            self._in_logging = False
 
-        # Add console output for local debugging
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
+    def info(self, data: Any) -> None:
+        self.emit("info", data)
 
-    return logger
-
-# Singleton-ish pattern for dev-toolkit-42 access
-logger = get_dev_logger()
+    def error(self, data: Any, exc: Exception = None) -> None:
+        payload = f"{data} (Exc: {exc})" if exc else data
+        self.emit("error", payload)
