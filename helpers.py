@@ -1,48 +1,42 @@
-from typing import Any, Callable, Dict, Union, List
+import json
+import functools
+from typing import Callable, Any
 
-class Harmonizer:
-    """A creative utility to clean, prune, and safely traverse messy nested data structures."""
-    
-    def __init__(self, data: Union[Dict, List]):
-        self.data = data
+def pipe(value: Any, *funcs: Callable) -> Any:
+    return functools.reduce(lambda v, f: f(v), funcs, value)
 
-    def prune(self, condition: Callable[[Any], bool] = lambda v: v in (None, "", [], {})) -> 'Harmonizer':
-        """Recursively removes keys/values matching the condition."""
-        def _clean(node: Any) -> Any:
-            if isinstance(node, dict):
-                return {k: _clean(v) for k, v in node.items() if not condition(v) and _clean(v) is not None}
-            elif isinstance(node, list):
-                return [_clean(x) for x in node if not condition(x) and _clean(x) is not None]
-            return node
-        
-        self.data = _clean(self.data) or {}
-        return self
+def memoize_file(filepath: str) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        cache = {}
+        try:
+            with open(filepath, 'r') as f:
+                cache = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = str(args) + str(kwargs)
+            if key not in cache:
+                cache[key] = func(*args, **kwargs)
+                with open(filepath, 'w') as f:
+                    json.dump(cache, f)
+            return cache[key]
+        return wrapper
+    return decorator
 
-    def navigate(self, path: str, default: Any = None) -> Any:
-        """Safely extracts nested data using dot-notation path."""
-        parts = path.split('.')
-        current = self.data
-        for part in parts:
-            if isinstance(current, dict) and part in current:
-                current = current[part]
-            elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
-                current = current[int(part)]
-            else:
-                return default
-        return current
+def retry(attempts: int = 3) -> Callable:
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_ex = None
+            for _ in range(attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_ex = e
+            raise last_ex
+        return wrapper
+    return decorator
 
-    def morph(self, transformer: Callable[[Any], Any]) -> 'Harmonizer':
-        """Applies a transformation function to all leaf values in the data structure."""
-        def _traverse(node: Any) -> Any:
-            if isinstance(node, dict):
-                return {k: _traverse(v) for k, v in node.items()}
-            elif isinstance(node, list):
-                return [_traverse(x) for x in node]
-            return transformer(node)
-        
-        self.data = _traverse(self.data)
-        return self
-
-    def collect(self) -> Union[Dict, List]:
-        """Returns the final processed structure."""
-        return self.data
+def flatten(lst: list) -> list:
+    return [item for sublist in lst for item in (flatten(sublist) if isinstance(sublist, list) else [sublist])]
