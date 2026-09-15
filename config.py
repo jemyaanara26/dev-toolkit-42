@@ -1,36 +1,51 @@
-import json
 import os
+from collections import ChainMap
 from typing import Any, Dict
 
-class ConfigLoader:
-    """A magical recursive dictionary merger for configuration hell."""
-    def __init__(self, defaults: Dict[str, Any]):
-        self._data = defaults
+class SelfInterpolatingConfig:
+    """Dynamic configuration loader with chain-resolution, environmental overrides, and string interpolation."""
 
-    def load(self, path: str) -> None:
-        if os.path.exists(path):
-            with open(path, 'r') as f:
-                user_data = json.load(f)
-                self._merge(self._data, user_data)
+    def __init__(self, defaults: Dict[str, Any], filepath: str | None = None):
+        self._defaults = defaults
+        self._file_data: Dict[str, Any] = {}
+        if filepath and os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                for line in f:
+                    clean = line.strip()
+                    if "=" in clean and not clean.startswith("#"):
+                        k, v = clean.split("=", 1)
+                        self._file_data[k.strip()] = v.strip()
 
-    def _merge(self, base: Dict, overrides: Dict) -> None:
-        for key, value in overrides.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._merge(base[key], value)
-            else:
-                base[key] = value
+        # Resolving hierarchy: environment -> configuration file -> default parameters
+        self._store = ChainMap(os.environ, self._file_data, self._defaults)
+        self._resolving: set[str] = set()
 
-    def get(self, key: str, default: Any = None) -> Any:
-        keys = key.split('.')
-        val = self._data
+    def __getattr__(self, name: str) -> Any:
+        if name not in self._store:
+            raise AttributeError(f"Configuration parameter '{name}' is not defined")
+        return self._interpolate(name, self._store[name])
+
+    def _interpolate(self, key: str, value: Any) -> Any:
+        if not isinstance(value, str) or "${" not in value:
+            return value
+
+        if key in self._resolving:
+            raise ValueError(f"Circular dependency detected during interpolation of: {key}")
+
+        self._resolving.add(key)
         try:
-            for k in keys:
-                val = val[k]
-            return val
-        except (KeyError, TypeError):
-            return default
+            while "${" in value:
+                start = value.find("${")
+                end = value.find("}", start)
+                if end == -1:
+                    break
+                var_name = value[start + 2:end]
+                resolved_val = str(getattr(self, var_name))
+                value = value[:start] + resolved_val + value[end + 1:]
+            return value
+        finally:
+            self._resolving.remove(key)
 
-def load_config(path: str, defaults: Dict[str, Any]) -> ConfigLoader:
-    loader = ConfigLoader(defaults)
-    loader.load(path)
-    return loader
+    def to_dict(self) -> Dict[str, Any]:
+        """Extract all keys and dynamically resolve references in a complete dictionary export."""
+        return {k: getattr(self, k) for k in self._store.keys()}
