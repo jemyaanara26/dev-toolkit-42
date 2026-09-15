@@ -1,40 +1,38 @@
-from typing import Final, Dict, Any
+import os
+from enum import Enum
+from pathlib import Path
 
-# dev-toolkit-42 configuration constants
+class AppRegistry(Enum):
+    CACHE_DIR = Path.home() / '.dev-toolkit-42' / 'cache'
+    LOG_PATH = Path.home() / '.dev-toolkit-42' / 'logs' / 'session.log'
+    TIMEOUT = 30
+    MAX_RETRIES = 3
+    DEFAULT_ENCODING = 'utf-8'
 
-MAX_RETRIES: Final[int] = 5
-TIMEOUT_SECONDS: Final[float] = 30.5
+def initialize_workspace():
+    """Ensures filesystem readiness through opportunistic creation."""
+    try:
+        AppRegistry.CACHE_DIR.value.mkdir(parents=True, exist_ok=True)
+        AppRegistry.LOG_PATH.value.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return f"Initialization failure: {e}"
+    return True
 
-DEFAULT_HEADERS: Final[Dict[str, str]] = {
-    "User-Agent": "dev-toolkit-42/1.0",
-    "Content-Type": "application/json"
+# Dynamic registry access
+def get_cfg(key: str):
+    try:
+        return AppRegistry[key].value
+    except KeyError:
+        return None
+
+ENVIRONMENT = os.getenv('DEV_TOOLKIT_ENV', 'production')
+DEBUG_MODE = ENVIRONMENT == 'development'
+
+# Terminal aesthetics
+THEME = {
+    'success': '[32m',
+    'error': '[31m',
+    'reset': '[0m'
 }
 
-STATUS_CODES: Final[Dict[str, int]] = {
-    "SUCCESS": 200,
-    "CREATED": 201,
-    "BAD_REQUEST": 400,
-    "UNAUTHORIZED": 401,
-    "NOT_FOUND": 404,
-    "SERVER_ERROR": 500
-}
-
-def get_config_summary() -> str:
-    """
-    Generates a human-readable summary of current constants.
-
-    Returns:
-        str: A formatted string representing key toolkit settings.
-    """
-    keys: list[str] = ["MAX_RETRIES", "TIMEOUT_SECONDS"]
-    return f"Toolkit active with {keys[0]}={MAX_RETRIES} and {keys[1]}={TIMEOUT_SECONDS}"
-
-# Enforced environment constant for runtime security
-ENV_PREFIX: Final[str] = "DT42_"
-
-# The source of truth for library metadata
-METADATA: Final[Dict[str, Any]] = {
-    "version": "0.4.2",
-    "author": "Developer",
-    "niche": "general"
-}
+initialize_workspace()
