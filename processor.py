@@ -1,39 +1,54 @@
-import time
-import random
-from typing import Iterator, Type, Tuple
+"""Polymorphic stream transformer with lazy processing capabilities."""
 
-class RetryAttempt:
-    def __init__(self, manager):
-        self.manager = manager
+from typing import TypeVar, Callable, Generic, Iterable, Generator, Any
 
-    def __enter__(self):
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+class MorphicProcessor(Generic[T]):
+    """A fluent pipeline builder for deferred stream transformations and side-effects."""
+
+    def __init__(self, source: Iterable[T]) -> None:
+        """Initialize the stream processor with a primary iterable source."""
+        self._iterable: Iterable[T] = source
+        self._transforms: list[Callable[[Any], Any]] = []
+
+    def pipe(self, transform: Callable[[Any], R]) -> "MorphicProcessor[R]":
+        """Attach a transformation stage to the lazy processing pipeline."""
+        self._transforms.append(transform)
+        return self  # type: ignore[return-value]
+
+    def tap(self, observer: Callable[[Any], None]) -> "MorphicProcessor[T]":
+        """Inject a side-effect observer into the pipeline without altering values."""
+
+        def _tap_wrapper(value: Any) -> Any:
+            observer(value)
+            return value
+
+        self._transforms.append(_tap_wrapper)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.manager.success = True
-            return True
-        if issubclass(exc_type, self.manager.exceptions):
-            if self.manager.attempts >= self.manager.max_attempts:
-                return False
-            return True
-        return False
+    def execute(self) -> Generator[Any, None, None]:
+        """Yield evaluated items after running all transformations sequentially."""
+        for item in self._iterable:
+            current: Any = item
+            for step in self._transforms:
+                current = step(current)
+            yield current
 
-class ResilientProcessor:
-    def __init__(self, max_attempts: int = 3, backoff: float = 1.5, exceptions: Tuple[Type[BaseException], ...] = (Exception,)):
-        self.max_attempts = max_attempts
-        self.backoff = backoff
-        self.exceptions = exceptions
-        self.attempts = 0
-        self.success = False
+    def collect(self) -> list[Any]:
+        """Drain the pipeline stream into a collected list output."""
+        return list(self.execute())
 
-    def __iter__(self) -> Iterator[RetryAttempt]:
-        delay = 0.5
-        while self.attempts < self.max_attempts and not self.success:
-            self.attempts += 1
-            yield RetryAttempt(self)
-            if self.success:
-                break
-            if self.attempts < self.max_attempts:
-                time.sleep(delay * (0.5 + random.random()))
-                delay *= self.backoff
+
+def batch_stream(data: Iterable[T], size: int = 3) -> Generator[list[T], None, None]:
+    """Chunk an incoming iterable stream into fixed-size window batches."""
+    batch: list[T] = []
+    for item in data:
+        batch.append(item)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
